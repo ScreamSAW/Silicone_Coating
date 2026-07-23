@@ -257,7 +257,9 @@ void add_linear_component(System& sys, int bead_count, int molecule_count, int c
         throw std::runtime_error("Ly and Lz must each be at least twice the placement spacing");
     const int nx = std::max(1, static_cast<int>(box.lx / (span + spacing)));
     const int ny = std::max(1, static_cast<int>(box.ly / spacing));
-    const int nz = std::max(1, static_cast<int>(box.lz / spacing));
+    const int nz = component == 3
+        ? std::max(1, static_cast<int>((box.lz / 2.0 - spacing) / spacing) + 1)
+        : std::max(1, static_cast<int>(box.lz / spacing));
     const long long capacity = 1LL * nx * ny * nz;
     if (capacity < molecule_count) {
         std::ostringstream msg;
@@ -276,6 +278,7 @@ void add_linear_component(System& sys, int bead_count, int molecule_count, int c
         const double y = (reverse ? box.ly / 2 - spacing : -box.ly / 2 + spacing) + (reverse ? -1 : 1) * iy * spacing;
         double z = 0.0;
         if (component == 2) z = box.lz / 2 - spacing - iz * spacing;
+        else if (component == 3) z = iz * spacing; // Filler starts at the midplane and grows toward +z.
         else z = -box.lz / 2 + spacing + iz * spacing;
 
         const int molecule_id = static_cast<int>(sys.atoms.empty() ? 1 : sys.atoms.back().molecule + 1);
