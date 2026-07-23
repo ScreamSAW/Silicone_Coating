@@ -260,9 +260,9 @@ The bulk workflow contains 7,000,000 total steps:
 
 ```text
 1M  relaxation at 800 K
-1M  isotropic compression at 800 K
-1M  relaxation at the compressed dimensions
-2M  crosslinking at fixed dimensions
+1M  isotropic compression with crosslinking at 800 K
+1M  relaxation with continued crosslinking
+2M  continued crosslinking at fixed dimensions
 1M  cooling from 800 K to 300 K under isotropic NPT
 1M  equilibration at 300 K under isotropic NPT
 ```
@@ -271,12 +271,14 @@ The film workflow contains 7,000,000 total steps:
 
 ```text
 1M  relaxation at 800 K
-1M  lateral compression at fixed Lz
-1M  relaxation at the compressed lateral dimensions
-2M  crosslinking at fixed dimensions
+1M  lateral compression with crosslinking at fixed Lz
+1M  relaxation with continued crosslinking
+2M  continued crosslinking at fixed dimensions
 1M  cooling from 800 K to 300 K under lateral NPT
 1M  equilibration at 300 K under lateral NPT
 ```
+
+In both geometries, `fix bond/create` remains active for 4,000,000 steps, beginning before compression so reactive sites can bond as compression brings them together.
 
 The generated Slurm script preserves the provided cluster defaults: one node,
 48 MPI tasks, 200 GB memory, the `nova` partition, and the
