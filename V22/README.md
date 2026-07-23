@@ -1,6 +1,6 @@
 # V22 LAMMPS data generator
 
-`v22_generator.cpp` creates a LAMMPS `atom_style full` data file containing coordinates, bonds, angles, and dihedrals for the four-component coarse-grained V22 formulation.
+`v22_generator.cpp` creates a complete four-file model package for the coarse-grained V22 formulation: a LAMMPS `atom_style full` data file, matching LAMMPS input, matching Slurm submission script, and a JSON model manifest with the `.info` extension.
 
 1. `N1`, `M1`: bifunctional network strands. The two terminal beads are reactive atom type 2.
 2. `N2`, `M2`: multifunctional cross-linkers. Reactive sites are atom type 3.
@@ -20,6 +20,27 @@ Display the built-in command reference with:
 ```bash
 ./v22_generator --help
 ```
+
+## Generated model package
+
+Every successful run writes four matching files in the same directory. For the
+default formulation:
+
+```text
+data.V22_PDMS_N32_10wt
+in.V22_PDMS_N32_10wt
+submit.V22_PDMS_N32_10wt.sh
+V22_PDMS_N32_10wt.info
+```
+
+The LAMMPS input reads the exact generated data filename. The Slurm script
+changes to its own directory before launching LAMMPS and reads the matching
+input filename, so the package can be copied to the cluster as one unit.
+
+The `.info` file is valid JSON and records composition, realized filler loading,
+box dimensions, topology counts, seeds, cross-linker sites, generated filenames,
+compression settings, and the selected bulk or film workflow. Its
+`format_version` field is intended to support future analysis scripts.
 
 ## Default setting
 
@@ -45,12 +66,13 @@ Other defaults:
 | Cross-linker random seed | `20260722` |
 | PDMS loading | approximately `10 wt%` |
 | Bead mass | `74 g/mol` |
-| Target density | `0.1 g/cm^3` |
+| Initial packing density | `0.1 g/cm^3` |
+| Density after scripted compression | `0.8 g/cm^3` |
 | Initial bond length | `2.801 angstrom` |
 | Molecule placement spacing | `7.0 angstrom` |
 | Geometry | Cubic bulk box |
 | Star-moderator coordinate seed | `5489` |
-| Output filename | `data.V22_PDMS_N32_10wt` |
+| Data filename | `data.V22_PDMS_N32_10wt` |
 
 `M2=225` is derived from stoichiometry, not independently specified. `M3=425` gives approximately 10 wt% PDMS after integer rounding.
 
@@ -71,12 +93,13 @@ Other defaults:
 | `--crosslink-distribution` | text | `random` | Either `random` or `regular` |
 | `--crosslink-seed` | integer | `20260722` | Reproducible random type-3 site selection |
 | `--mass` | number | `74` | Common bead mass in g/mol; must be positive |
-| `--density` | number | `0.1` | Target density in g/cm3; must be positive |
+| `--density` | number | `0.1` | Initial packing density in g/cm3; must be positive |
+| `--target-density` | number | `0.8` | Density reached by scripted compression; must be positive |
 | `--bond-length` | number | `2.801` | Initial bond length in angstrom; must be positive |
 | `--spacing` | number | `7.0` | Initial molecule-placement spacing; must be positive |
 | `--thickness` | number | omitted | Enables film mode with fixed `Lz` in angstrom |
 | `--seed` | integer | `5489` | Reproducible star-moderator coordinate seed |
-| `--output` | path | automatic | Overrides automatic output naming |
+| `--output` | path | automatic | Overrides the data filename; companion files use the same directory and derived case name |
 | `--help` | none | — | Prints built-in help and exits |
 
 `--m2` is deliberately rejected because the program calculates `M2` from stoichiometry.
@@ -139,12 +162,24 @@ other composition controls:
   --filler-wt 15
 ```
 
-The LAMMPS data file defines the rectangular simulation box but does not define
-boundary behavior. To keep the film thickness fixed during simulation, use
-nonperiodic boundaries in `z` and avoid barostatting `z`. For example, the
-LAMMPS input script may use `boundary p p f` together with an appropriate
-`fix wall/*` command at the lower and upper z boundaries. The exact wall style
-and parameters depend on the desired physical surface interaction.
+The film thickness should be taken from the corresponding equilibrated bulk
+simulation and supplied through `--thickness`. The manifest records this
+bulk-to-film provenance expectation.
+
+The generated film input uses `boundary p p f` and repulsive
+`wall/lj126` surfaces at `zlo EDGE` and `zhi EDGE`. It never deforms or
+barostats `z`. Compression and final NPT control operate only in `x` and
+`y`, with `couple xy`.
+
+The compression scale is calculated from the initial and target densities:
+
+```text
+bulk scale per dimension = (initial_density / target_density)^(1/3)
+film x/y scale           = (initial_density / target_density)^(1/2)
+```
+
+With the defaults, bulk uses `0.5` in x/y/z and film uses approximately
+`0.35355339` in x/y while keeping Lz fixed.
 
 ## Cross-linker stoichiometry
 
@@ -210,7 +245,61 @@ This example retains the fixed V22 network strands and moderators, uses function
   --seed 5489
 ```
 
-The program calculates `M2=150`, calculates the required integer `M3`, reports the realized composition, and writes `data.V22_PDMS_N64_15wt`.
+The program calculates `M2=150`, calculates the required integer `M3`,
+reports the realized composition, and writes the data, LAMMPS input, Slurm
+script, and `.info` manifest for `V22_PDMS_N64_15wt`.
+
+## Generated simulation workflows
+
+The generated input preserves the supplied V22 workflows while avoiding
+temperature-variable redefinition, which is not portable to the 2023 LAMMPS
+module used by the Slurm template. Temperature-dependent LJ values are
+calculated by the generator and written numerically.
+
+The bulk workflow contains 5,000,000 total steps:
+
+```text
+1M  relaxation at 800 K
+2M  isotropic compression and crosslinking at 800 K
+1M  cooling from 800 K to 300 K under isotropic NPT
+1M  equilibration at 300 K under isotropic NPT
+```
+
+The film workflow contains 7,000,000 total steps:
+
+```text
+1M  relaxation at 800 K
+1M  lateral compression at fixed Lz
+1M  relaxation at the compressed lateral dimensions
+2M  crosslinking at fixed dimensions
+1M  cooling from 800 K to 300 K under lateral NPT
+1M  equilibration at 300 K under lateral NPT
+```
+
+The generated Slurm script preserves the provided cluster defaults: one node,
+48 MPI tasks, 200 GB memory, the `nova` partition, and the
+`lammps/20230802.2-py310-openmpi4-ezoqd7f` module.
+
+## `.info` manifest
+
+Although its extension is `.info`, the manifest uses JSON. For example:
+
+```json
+{
+  "format": "V22-model-info",
+  "format_version": 1,
+  "geometry": "film",
+  "film_thickness_angstrom": 257.07,
+  "composition": {
+    "requested_filler_weight_percent": 5.0,
+    "realized_filler_weight_percent": 4.99138613
+  }
+}
+```
+
+Future analysis tools should check `format` and `format_version` before
+reading fields. The manifest intentionally records both requested and realized
+filler weight percentages because integer molecule counts introduce rounding.
 
 ## Modeling notes
 
@@ -219,4 +308,6 @@ The program calculates `M2=150`, calculates the required integer `M3`, reports t
 - The star moderator preserves the original planar five-bead geometry and its six arm-arm angles.
 - Star-moderator centers preserve the original narrow z slab, from `0.02L` to `0.12L`.
 - Coordinates are initial placements and can overlap under periodic wrapping. Energy minimization or another packing/overlap-removal procedure is needed before production dynamics.
+- Neutral PDMS filler chains start at the z=0 midplane and add layers toward positive z after filling the lateral grid.
+- Film wall positions are tied to the generated z box edges rather than hardcoded coordinates.
 - The filler calculation currently assumes the same coarse-grained bead mass for all components.
