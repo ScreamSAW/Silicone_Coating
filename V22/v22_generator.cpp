@@ -536,37 +536,37 @@ void write_lammps_input(const Settings& s, const OutputFiles& files) {
         << "unfix           integrate\n\n";
 
     if (film) {
-        out << "# Lateral compression at fixed film thickness\n"
+        out << "# Lateral compression with crosslinking at fixed film thickness\n"
             << "fix             integrate all nvt temp 800.0 800.0 50.0\n"
-            << "fix             compress all deform 1 x scale " << compression_scale
-            << " y scale " << compression_scale << " units box\n"
-            << "run             1000000\n"
-            << "unfix           compress\n\n"
-            << "# Relax the compressed film before crosslinking\n"
-            << "run             1000000\n\n"
-            << "# Crosslink at fixed dimensions\n"
             << "fix             xlink all bond/create 1 2 3 " << hot.cutoff
             << " 2 iparam 1 1 jparam 1 1 prob 0.1 348154\n"
             << "thermo_style    custom step temp density etotal epair ebond eangle"
             << " edihed f_xlink[1] f_xlink[2] bonds\n"
+            << "fix             compress all deform 1 x scale " << compression_scale
+            << " y scale " << compression_scale << " units box\n"
+            << "run             1000000\n"
+            << "unfix           compress\n\n"
+            << "# Relax at the compressed dimensions with continued crosslinking\n"
+            << "run             1000000\n\n"
+            << "# Continue crosslinking at fixed dimensions\n"
             << "run             2000000\n"
             << "unfix           integrate\n"
             << "unfix           xlink\n";
     } else {
-        out << "# Isotropic compression at 800 K\n"
+        out << "# Isotropic compression with crosslinking at 800 K\n"
             << "fix             integrate all nvt temp 800.0 800.0 50.0\n"
+            << "fix             xlink all bond/create 1 2 3 " << hot.cutoff
+            << " 2 iparam 1 1 jparam 1 1 prob 0.1 348154\n"
+            << "thermo_style    custom step temp density etotal epair ebond eangle"
+            << " edihed f_xlink[1] f_xlink[2] bonds\n"
             << "fix             compress all deform 1 x scale " << compression_scale
             << " y scale " << compression_scale << " z scale " << compression_scale
             << " units box\n"
             << "run             1000000\n"
             << "unfix           compress\n\n"
-            << "# Relax the compressed bulk before crosslinking\n"
+            << "# Relax at the compressed dimensions with continued crosslinking\n"
             << "run             1000000\n\n"
-            << "# Crosslink at fixed dimensions\n"
-            << "fix             xlink all bond/create 1 2 3 " << hot.cutoff
-            << " 2 iparam 1 1 jparam 1 1 prob 0.1 348154\n"
-            << "thermo_style    custom step temp density etotal epair ebond eangle"
-            << " edihed f_xlink[1] f_xlink[2] bonds\n"
+            << "# Continue crosslinking at fixed dimensions\n"
             << "run             2000000\n"
             << "unfix           integrate\n"
             << "unfix           xlink\n";
@@ -757,7 +757,8 @@ void write_info(const Settings& s, const System& sys, const Box& box,
         << "    \"cold_lj\": {\"epsilon\": " << cold.epsilon << ", \"sigma\": " << cold.sigma
         << ", \"cutoff\": " << cold.cutoff << "},\n"
         << "    \"timestep_fs\": 5.0,\n"
-        << "    \"total_run_steps\": 7000000\n"
+        << "    \"total_run_steps\": 7000000,\n"
+        << "    \"bond_creation_active_steps\": 4000000\n"
         << "  }\n"
         << "}\n";
     if (!out) throw std::runtime_error("Failed while writing model info file: " + files.info);
