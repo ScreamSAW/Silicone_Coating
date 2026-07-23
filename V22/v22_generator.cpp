@@ -29,6 +29,7 @@ struct Settings {
     double density = 0.1;
     double bond_length = 2.801;
     double spacing = 7.0;
+    double thickness = -1.0; // Negative selects the original cubic bulk box.
     std::uint32_t seed = 5489u;
     std::string output = "data.V22_PDMS_N32_10wt";
     bool output_explicit = false;
@@ -40,6 +41,7 @@ struct Atom { int id, molecule, type; double charge, x, y, z; };
 struct Bond { int id, type, a, b; };
 struct Angle { int id, type, a, b, c; };
 struct Dihedral { int id, type, a, b, c, d; };
+struct Box { double lx, ly, lz; };
 
 struct System {
     std::vector<Atom> atoms;
@@ -76,6 +78,7 @@ void print_help(const char* program) {
         << "  --density X       target density in g/cm^3 (default: 0.1)\n"
         << "  --bond-length X   initial bond length in angstrom (default: 2.801)\n"
         << "  --spacing X       spacing between placed molecules (default: 7.0)\n"
+        << "  --thickness X     fixed film thickness Lz in angstrom; omit for bulk\n"
         << "  --seed N          reproducible random seed (default: 5489)\n"
         << "  --output FILE     override the automatically generated output filename\n"
         << "  --help             show this help\n";
@@ -104,6 +107,7 @@ Settings parse_args(int argc, char** argv) {
         else if (option == "--density") s.density = parse_double(value, option);
         else if (option == "--bond-length") s.bond_length = parse_double(value, option);
         else if (option == "--spacing") s.spacing = parse_double(value, option);
+        else if (option == "--thickness") s.thickness = parse_double(value, option);
         else if (option == "--seed") s.seed = static_cast<std::uint32_t>(parse_int(value, option));
         else if (option == "--output") { s.output = value; s.output_explicit = true; }
         else if (option == "--filler-length") { s.n3 = parse_int(value, option); s.filler_length_explicit = true; }
@@ -163,6 +167,11 @@ void apply_crosslinker_stoichiometry(Settings& s) {
     s.m2 = static_cast<int>(molecule_count);
 }
 
+void apply_geometry_filename(Settings& s) {
+    if (s.thickness > 0.0 && !s.output_explicit)
+        s.output += "_film_Lz" + filename_number(s.thickness);
+}
+
 void report_composition(const Settings& s) {
     const int n[] = {s.n1, s.n2, s.n3, s.n4};
     const int m[] = {s.m1, s.m2, s.m3, s.m4};
@@ -199,6 +208,8 @@ void validate(const Settings& s) {
         throw std::runtime_error("Regular placement at 1,3,5,... requires functionality <= ceil(N2/2)");
     if (s.bead_mass <= 0 || s.density <= 0 || s.bond_length <= 0 || s.spacing <= 0)
         throw std::runtime_error("Mass, density, bond length, and spacing must be positive");
+    if (s.thickness == 0.0)
+        throw std::runtime_error("--thickness must be positive; omit it for the cubic bulk system");
     const long long total_beads = 1LL*s.n1*s.m1 + 1LL*s.n2*s.m2 + 1LL*s.n3*s.m3 + 1LL*s.n4*s.m4;
     if (total_beads <= 0) throw std::runtime_error("The formulation must contain at least one bead");
     if (s.output.empty()) throw std::runtime_error("Output filename cannot be empty");
@@ -234,15 +245,20 @@ void add_linear_topology(System& sys, int first_atom, int bead_count) {
 }
 
 void add_linear_component(System& sys, int bead_count, int molecule_count, int component,
-                          double box, double bond_length, double spacing,
+                          const Box& box, double bond_length, double spacing,
                           const std::set<int>& reactive_sites = {}) {
     if (bead_count == 0 && molecule_count != 0) throw std::runtime_error("A nonzero molecule count requires N > 0");
     if (molecule_count == 0) return;
 
     const double span = std::max(0, bead_count - 1) * bond_length;
-    const int nx = std::max(1, static_cast<int>(box / (span + spacing)));
-    const int ny = std::max(1, static_cast<int>(box / spacing));
-    const long long capacity = 1LL * nx * ny * ny;
+    if (box.lx < span + 2.0*spacing)
+        throw std::runtime_error("Lx is too small for a straight chain plus placement margins");
+    if (box.ly < 2.0*spacing || box.lz < 2.0*spacing)
+        throw std::runtime_error("Ly and Lz must each be at least twice the placement spacing");
+    const int nx = std::max(1, static_cast<int>(box.lx / (span + spacing)));
+    const int ny = std::max(1, static_cast<int>(box.ly / spacing));
+    const int nz = std::max(1, static_cast<int>(box.lz / spacing));
+    const long long capacity = 1LL * nx * ny * nz;
     if (capacity < molecule_count) {
         std::ostringstream msg;
         msg << "Placement grid capacity (" << capacity << ") is smaller than M" << component
@@ -255,13 +271,12 @@ void add_linear_component(System& sys, int bead_count, int molecule_count, int c
         const int iy = (molecule_index / nx) % ny;
         const int iz = molecule_index / (nx * ny);
         const bool reverse = component != 1;
-        double x = reverse ? box / 2 - spacing - ix * (span + spacing)
-                           : -box / 2 + spacing + ix * (span + spacing);
-        const double y = (reverse ? box / 2 - spacing : -box / 2 + spacing) + (reverse ? -1 : 1) * iy * spacing;
+        double x = reverse ? box.lx / 2 - spacing - ix * (span + spacing)
+                           : -box.lx / 2 + spacing + ix * (span + spacing);
+        const double y = (reverse ? box.ly / 2 - spacing : -box.ly / 2 + spacing) + (reverse ? -1 : 1) * iy * spacing;
         double z = 0.0;
-        if (component == 1) z = -box / 2 + spacing + iz * spacing;
-        else if (component == 2) z = box / 2 - spacing - iz * spacing;
-        else z = -spacing - iz * spacing;
+        if (component == 2) z = box.lz / 2 - spacing - iz * spacing;
+        else z = -box.lz / 2 + spacing + iz * spacing;
 
         const int molecule_id = static_cast<int>(sys.atoms.empty() ? 1 : sys.atoms.back().molecule + 1);
         const int first_atom = static_cast<int>(sys.atoms.size()) + 1;
@@ -276,13 +291,17 @@ void add_linear_component(System& sys, int bead_count, int molecule_count, int c
     }
 }
 
-void add_star_moderators(System& sys, const Settings& s, double box, std::mt19937& rng) {
-    std::uniform_real_distribution<double> xy(-box / 2, box / 2);
-    std::uniform_real_distribution<double> zdist(0.02 * box, 0.12 * box); // Preserves V22's original slab.
+void add_star_moderators(System& sys, const Settings& s, const Box& box, std::mt19937& rng) {
+    const double margin = s.bond_length;
+    if (box.lx <= 2.0*margin || box.ly <= 2.0*margin)
+        throw std::runtime_error("Lateral box dimensions are too small for a star moderator");
+    std::uniform_real_distribution<double> xdist(-box.lx/2 + margin, box.lx/2 - margin);
+    std::uniform_real_distribution<double> ydist(-box.ly/2 + margin, box.ly/2 - margin);
+    std::uniform_real_distribution<double> zdist(0.02 * box.lz, 0.12 * box.lz); // Preserves V22's original slab.
     for (int i = 0; i < s.m4; ++i) {
         const int molecule_id = static_cast<int>(sys.atoms.empty() ? 1 : sys.atoms.back().molecule + 1);
         const int center = static_cast<int>(sys.atoms.size()) + 1;
-        const double x = xy(rng), y = xy(rng), z = zdist(rng), b = s.bond_length;
+        const double x = xdist(rng), y = ydist(rng), z = zdist(rng), b = s.bond_length;
         // Preserve the legacy force-field mapping: ordinary center, type-2 arms.
         sys.atoms.push_back({center,     molecule_id, 1, 0.0, x,     y,     z});
         sys.atoms.push_back({center + 1, molecule_id, 2, 0.0, x + b, y,     z});
@@ -297,7 +316,7 @@ void add_star_moderators(System& sys, const Settings& s, double box, std::mt1993
     }
 }
 
-System build_system(const Settings& s, double box) {
+System build_system(const Settings& s, const Box& box) {
     System sys;
     const long long expected_atoms = 1LL * s.n1*s.m1 + 1LL * s.n2*s.m2 + 1LL * s.n3*s.m3 + 1LL * s.n4*s.m4;
     if (expected_atoms > 100000000LL) throw std::runtime_error("Requested system is too large");
@@ -317,7 +336,7 @@ System build_system(const Settings& s, double box) {
     return sys;
 }
 
-void write_data(const Settings& s, const System& sys, double box) {
+void write_data(const Settings& s, const System& sys, const Box& box) {
     std::ofstream out(s.output);
     if (!out) throw std::runtime_error("Cannot open output file: " + s.output);
     out << "LAMMPS data file for the V22 four-component formulation\n\n"
@@ -326,9 +345,9 @@ void write_data(const Settings& s, const System& sys, double box) {
         << sys.angles.size() << " angles\n1 angle types\n"
         << sys.dihedrals.size() << " dihedrals\n1 dihedral types\n\n"
         << std::fixed << std::setprecision(6)
-        << -box/2 << ' ' << box/2 << " xlo xhi\n"
-        << -box/2 << ' ' << box/2 << " ylo yhi\n"
-        << -box/2 << ' ' << box/2 << " zlo zhi\n\nMasses\n\n";
+        << -box.lx/2 << ' ' << box.lx/2 << " xlo xhi\n"
+        << -box.ly/2 << ' ' << box.ly/2 << " ylo yhi\n"
+        << -box.lz/2 << ' ' << box.lz/2 << " zlo zhi\n\nMasses\n\n";
     for (int type = 1; type <= 4; ++type) out << type << ' ' << s.bead_mass << '\n';
     out << "\nAtoms # full\n\n" << std::setprecision(3);
     for (const auto& a : sys.atoms)
@@ -356,16 +375,25 @@ int main(int argc, char** argv) {
         Settings settings = parse_args(argc, argv);
         apply_crosslinker_stoichiometry(settings);
         apply_filler_composition(settings);
+        apply_geometry_filename(settings);
         validate(settings);
         report_composition(settings);
         const long long beads = 1LL*settings.n1*settings.m1 + 1LL*settings.n2*settings.m2
                               + 1LL*settings.n3*settings.m3 + 1LL*settings.n4*settings.m4;
-        const double box = std::cbrt(beads * settings.bead_mass / (settings.density * kAvogadroScale));
+        const double volume = beads * settings.bead_mass / (settings.density * kAvogadroScale);
+        Box box{};
+        if (settings.thickness > 0.0) {
+            box.lz = settings.thickness;
+            box.lx = box.ly = std::sqrt(volume / box.lz);
+        } else {
+            box.lx = box.ly = box.lz = std::cbrt(volume);
+        }
         const System system = build_system(settings, box);
         write_data(settings, system, box);
         std::cerr << "Wrote " << settings.output << " (" << system.atoms.size() << " atoms, "
                   << system.bonds.size() << " bonds, " << system.angles.size() << " angles, "
-                  << system.dihedrals.size() << " dihedrals; box " << box << " A)\n";
+                  << system.dihedrals.size() << " dihedrals; box "
+                  << box.lx << " x " << box.ly << " x " << box.lz << " A)\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n';
