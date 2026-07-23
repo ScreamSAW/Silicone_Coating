@@ -48,6 +48,7 @@ Other defaults:
 | Target density | `0.1 g/cm^3` |
 | Initial bond length | `2.801 angstrom` |
 | Molecule placement spacing | `7.0 angstrom` |
+| Geometry | Cubic bulk box |
 | Star-moderator coordinate seed | `5489` |
 | Output filename | `data.V22_PDMS_N32_10wt` |
 
@@ -73,6 +74,7 @@ Other defaults:
 | `--density` | number | `0.1` | Target density in g/cm3; must be positive |
 | `--bond-length` | number | `2.801` | Initial bond length in angstrom; must be positive |
 | `--spacing` | number | `7.0` | Initial molecule-placement spacing; must be positive |
+| `--thickness` | number | omitted | Enables film mode with fixed `Lz` in angstrom |
 | `--seed` | integer | `5489` | Reproducible star-moderator coordinate seed |
 | `--output` | path | automatic | Overrides automatic output naming |
 | `--help` | none | — | Prints built-in help and exits |
@@ -108,6 +110,41 @@ Either input may be used alone:
 ```
 
 Use `--output FILE` to replace the automatically generated filename.
+
+## Film geometry
+
+Omitting `--thickness` preserves the original cubic bulk system. Supplying a
+positive thickness enables film mode:
+
+```bash
+./v22_generator --thickness 100
+```
+
+The requested value becomes the fixed `Lz`. The program preserves the target
+density by calculating equal lateral dimensions:
+
+```text
+volume = total_bead_mass / density
+Lx = Ly = sqrt(volume / Lz)
+```
+
+The example automatically writes
+`data.V22_PDMS_N32_10wt_film_Lz100`. Film geometry can be combined with the
+other composition controls:
+
+```bash
+./v22_generator \
+  --thickness 80 \
+  --filler-length 64 \
+  --filler-wt 15
+```
+
+The LAMMPS data file defines the rectangular simulation box but does not define
+boundary behavior. To keep the film thickness fixed during simulation, use
+nonperiodic boundaries in `z` and avoid barostatting `z`. For example, the
+LAMMPS input script may use `boundary p p f` together with an appropriate
+`fix wall/*` command at the lower and upper z boundaries. The exact wall style
+and parameters depend on the desired physical surface interaction.
 
 ## Cross-linker stoichiometry
 
