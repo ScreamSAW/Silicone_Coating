@@ -256,11 +256,13 @@ temperature-variable redefinition, which is not portable to the 2023 LAMMPS
 module used by the Slurm template. Temperature-dependent LJ values are
 calculated by the generator and written numerically.
 
-The bulk workflow contains 5,000,000 total steps:
+The bulk workflow contains 7,000,000 total steps:
 
 ```text
 1M  relaxation at 800 K
-2M  isotropic compression and crosslinking at 800 K
+1M  isotropic compression at 800 K
+1M  relaxation at the compressed dimensions
+2M  crosslinking at fixed dimensions
 1M  cooling from 800 K to 300 K under isotropic NPT
 1M  equilibration at 300 K under isotropic NPT
 ```
