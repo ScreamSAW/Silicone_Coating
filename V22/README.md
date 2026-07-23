@@ -34,8 +34,9 @@ V22_PDMS_N32_10wt.info
 ```
 
 The LAMMPS input reads the exact generated data filename. The Slurm script
-changes to its own directory before launching LAMMPS and reads the matching
-input filename, so the package can be copied to the cluster as one unit.
+changes to the directory recorded by `SLURM_SUBMIT_DIR` before launching
+LAMMPS and reads the matching input filename, so the package can be copied to
+the cluster and submitted from that directory as one unit.
 
 The `.info` file is valid JSON and records composition, realized filler loading,
 box dimensions, topology counts, seeds, cross-linker sites, generated filenames,
